@@ -1,6 +1,4 @@
 #include <iostream>
-#include <type_traits>
-#include <utility>
 #include <variant>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
@@ -92,12 +90,15 @@ void ProcessEvent(CMockGestureManager& gm, const wf::touch::gesture_event_t& ev)
     CHECK_FALSE(gm.cancelled);
     switch (ev.type) {
         case wf::touch::EVENT_TYPE_TOUCH_DOWN:
+            std::cout << "TOUCH_DOWN id=" << ev.finger << std::endl;
             gm.onTouchDown(ev);
             break;
         case wf::touch::EVENT_TYPE_TOUCH_UP:
+            std::cout << "TOUCH_UP id=" << ev.finger << std::endl;
             gm.onTouchUp(ev);
             break;
         case wf::touch::EVENT_TYPE_MOTION:
+            std::cout << "TOUCH_MOVE id=" << ev.finger << " pos=" << ev.pos.x << "," << ev.pos.y << std::endl;
             gm.onTouchMove(ev);
             break;
     }
@@ -150,8 +151,10 @@ TEST_CASE("Swipe Drag: Start drag upon moving more than the threshold") {
     ProcessEvents(gm, {.type = ExpectResultType::DRAG_TRIGGERED}, events);
 }
 
-TEST_CASE("Swipe Drag: Cancel 3 finger swipe due to moving too much before "
-          "adding new finger, but not enough to trigger 3 finger swipe first") {
+TEST_CASE(
+    "Swipe Drag: Cancel 3 finger swipe due to moving too much before "
+    "adding new finger, but not enough to trigger 3 finger swipe first"
+) {
     log_start_of_test();
     auto gm = CMockGestureManager::newDragHandler();
     gm.addMultiFingerGesture(SWIPE_THRESHOLD, SWIPE_INCORRECT_DRAG_TOLERANCE, &SENSITIVITY, &LONG_PRESS_DELAY);
@@ -166,8 +169,10 @@ TEST_CASE("Swipe Drag: Cancel 3 finger swipe due to moving too much before "
     ProcessEvents(gm, {.type = ExpectResultType::CANCELLED}, events);
 }
 
-TEST_CASE("Swipe: Complete upon moving more than the threshold then lifting a "
-          "finger") {
+TEST_CASE(
+    "Swipe: Complete upon moving more than the threshold then lifting a "
+    "finger"
+) {
     log_start_of_test();
     auto gm = CMockGestureManager::newCompletedGestureOnlyHandler();
     gm.addMultiFingerGesture(SWIPE_THRESHOLD, SWIPE_INCORRECT_DRAG_TOLERANCE, &SENSITIVITY, &LONG_PRESS_DELAY);
@@ -185,6 +190,24 @@ TEST_CASE("Swipe: Complete upon moving more than the threshold then lifting a "
         Ev{wf::touch::EVENT_TYPE_TOUCH_UP, 300, 0, {100, 290}},
     };
     ProcessEvents(gm, {.type = ExpectResultType::COMPLETED}, events);
+}
+
+TEST_CASE("Swipe: completed takes priority over drag gesture when both enabled") {
+    log_start_of_test();
+    auto gm = CMockGestureManager::newBothHandler();
+    gm.addMultiFingerGesture(SWIPE_THRESHOLD, SWIPE_INCORRECT_DRAG_TOLERANCE, &SENSITIVITY, &LONG_PRESS_DELAY);
+
+    const std::vector<TouchEvent> events{
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 0, {450, 290}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 1, {500, 300}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 2, {550, 290}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 0, {0, 290}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 1, {50, 300}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 2, {100, 290}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_UP, 300, 0, {100, 290}},
+    };
+    ProcessEvents(gm, {.type = ExpectResultType::COMPLETED}, events);
+    CHECK_FALSE(gm.getActiveDragGesture().has_value());
 }
 
 TEST_CASE("Multi-finger Tap") {
@@ -228,7 +251,8 @@ TEST_CASE("Multi-finger Tap: finger moved too much") {
     const std::vector<TouchEvent> events{
         Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 0, {450, 290}},
         Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 105, 1, {500, 300}},
-        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 110, 2, {550, 290}}, Ev{wf::touch::EVENT_TYPE_MOTION, 120, 1, {650, 290}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 110, 2, {550, 290}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 120, 1, {650, 290}},
         // {wf::touch::EVENT_TYPE_TOUCH_UP, 130, 2, {550, 290}},
     };
 
@@ -330,10 +354,29 @@ TEST_CASE("Long press and drag: cancelled due to too much movement") {
     ProcessEvents(gm, {.type = ExpectResultType::CANCELLED}, events);
 }
 
-TEST_CASE("Edge Swipe: Complete upon: \n"
-          "1. touch down on edge of screen\n"
-          "2. swiping more than the threshold, within the time limit, then\n"
-          "3. lifting the finger, within the time limit.\n") {
+TEST_CASE("Long press: completed takes priority over drag gesture when both enabled") {
+    log_start_of_test();
+    auto gm = CMockGestureManager::newBothHandler();
+    gm.addLongPress(SWIPE_THRESHOLD, &SENSITIVITY, &LONG_PRESS_DELAY);
+
+    const std::vector<TouchEvent> events{
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 0, {450, 290}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 105, 1, {500, 300}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 110, 2, {550, 290}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 0, {460, 300}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 300, 1, {510, 290}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 511, 2, {560, 300}},
+    };
+    ProcessEvents(gm, {.type = ExpectResultType::COMPLETED}, events);
+    CHECK_FALSE(gm.getActiveDragGesture().has_value());
+}
+
+TEST_CASE(
+    "Edge Swipe: Complete upon: \n"
+    "1. touch down on edge of screen\n"
+    "2. swiping more than the threshold, within the time limit, then\n"
+    "3. lifting the finger, within the time limit.\n"
+) {
     log_start_of_test();
     auto gm = CMockGestureManager::newCompletedGestureOnlyHandler();
     gm.addEdgeSwipeGesture(
@@ -369,12 +412,14 @@ TEST_CASE("Edge Swipe: Timeout during swiping phase") {
     ProcessEvents(gm, {.type = ExpectResultType::CANCELLED}, events);
 }
 
-TEST_CASE("Edge Swipe: Fail check at the end for not starting swipe from an edge\n"
-          "1. touch down somewhere NOT considered edge.\n"
-          "2. swipe more than the threshold, within the time limit, then\n"
-          "3. lift the finger, within the time limit.\n"
-          "The starting position of the swipe is checked at the end and should "
-          "fail.") {
+TEST_CASE(
+    "Edge Swipe: Fail check at the end for not starting swipe from an edge\n"
+    "1. touch down somewhere NOT considered edge.\n"
+    "2. swipe more than the threshold, within the time limit, then\n"
+    "3. lift the finger, within the time limit.\n"
+    "The starting position of the swipe is checked at the end and should "
+    "fail."
+) {
     log_start_of_test();
     auto gm = CMockGestureManager::newCompletedGestureOnlyHandler();
     gm.addEdgeSwipeGesture(
@@ -504,6 +549,23 @@ TEST_CASE("Edge swipe: block touch events") {
     CHECK(gm.eventForwardingInhibited());
 }
 
+TEST_CASE("Edge Swipe: completed takes priority over drag gesture when both enabled") {
+    log_start_of_test();
+    auto gm = CMockGestureManager::newBothHandler();
+    gm.addEdgeSwipeGesture(
+        SWIPE_THRESHOLD, SWIPE_INCORRECT_DRAG_TOLERANCE, &SENSITIVITY, &LONG_PRESS_DELAY, &EDGE_MARGIN
+    );
+
+    const std::vector<TouchEvent> events{
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 0, {5, 300}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 150, 0, {250, 300}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 0, {455, 300}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_UP, 300, 0, {455, 300}},
+    };
+    ProcessEvents(gm, {.type = ExpectResultType::COMPLETED}, events);
+    CHECK_FALSE(gm.getActiveDragGesture().has_value());
+}
+
 TEST_CASE("Pinch in: full drag") {
     log_start_of_test();
     auto gm = CMockGestureManager::newDragHandler();
@@ -598,4 +660,28 @@ TEST_CASE("Pinch out: completed gesture") {
     ProcessEvents(gm, {.type = ExpectResultType::COMPLETED}, events);
 
     CHECK(gm.eventForwardingInhibited());
+}
+
+TEST_CASE("Pinch: completed takes priority over drag gesture when both enabled") {
+    log_start_of_test();
+    auto gm = CMockGestureManager::newBothHandler();
+    gm.addPinchGesture(TEST_PINCH_THRESHOLD, &SENSITIVITY, &LONG_PRESS_DELAY);
+
+    const std::vector<TouchEvent> events{
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 0, {150, 200}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 1, {200, 140}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_DOWN, 100, 2, {250, 200}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 0, {110, 200}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 1, {200, 90}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 200, 2, {290, 200}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 260, 0, {60, 210}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 260, 1, {200, 120}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 260, 2, {340, 210}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 300, 0, {30, 250}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 300, 1, {200, 20}},
+        Ev{wf::touch::EVENT_TYPE_MOTION, 300, 2, {400, 220}},
+        Ev{wf::touch::EVENT_TYPE_TOUCH_UP, 400, 0, {50, 200}},
+    };
+    ProcessEvents(gm, {.type = ExpectResultType::COMPLETED}, events);
+    CHECK_FALSE(gm.getActiveDragGesture().has_value());
 }
